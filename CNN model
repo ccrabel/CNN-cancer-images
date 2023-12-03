@@ -1,0 +1,637 @@
+#! pip install kaggle
+
+
+! cp kaggle.json ~/.kaggle/
+! chmod 600 ~/.kaggle/kaggle.json
+
+! kaggle competitions download -c histopathologic-cancer-detection
+
+import subprocess
+
+zip_file_path = '/content/histopathologic-cancer-detection.zip'
+extracted_dir = '/content/'
+
+subprocess.run(['unzip', zip_file_path, '-d', extracted_dir],
+               stdout=subprocess.DEVNULL)
+
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import os
+import cv2
+import random as rn
+from tqdm import tqdm
+
+## Problem Description
+This task, taken from the Kaggle Histopthologic Cancer Detection competition, https://www.kaggle.com/competitions/histopathologic-cancer-detection/overview, uses digital images of tissue samples to predict if the sample has cancer. The center of each image, 32 by 32 pixels, is categorized as having cancer or not if one of the pixels has a cancerous tumor cell.
+
+The original dataset, PCam, contained duplicates, however, for the dataset published on Kaggle duplicates were removed.
+
+train_labels_df = pd.read_csv('/content/train_labels.csv')
+train_labels_df.head()
+
+train_labels_df.info()
+
+train_labels_df.nunique()
+
+# number of unique images
+
+n = train_labels_df.shape[0]
+
+print(f"There are {n} unique images in the training dataset.")
+
+# Importing the file names of the training images
+DIR = '/content/train'
+img_dir = os.listdir(DIR)
+
+print(img_dir[0:3])
+
+# Function to mport an individual image, taking the path directory
+# and index as variables, and returning the image
+
+def import_img(path_dir, idx):
+    path = os.path.join(path_dir, idx)
+    img = cv2.imread(path, cv2.IMREAD_COLOR)
+
+    return(img)
+
+
+# Importing and plotting a randomly selected image from the training data.
+
+rn.seed(111)
+idx = rn.randint(0, n) #random selection of image
+path = os.path.join(DIR, img_dir[idx])
+img = cv2.imread(path, cv2.IMREAD_COLOR)
+
+plt.imshow(img)
+plt.title(f"Cancer label: {train_labels_df.iloc[idx][1]} \n \
+Image name: {img_dir[idx]}")
+plt.show()
+
+print(f"The dimensions of the sample image are {img.shape}.")
+
+# Plotting a random selection of images. The yellow box is the 32 x 32 pixel
+# square that determines if the image has a 0 or 1 cancer label.
+
+fig,ax=plt.subplots(2,4)
+fig.set_size_inches(7, 5)
+
+for i in range(2):
+    for j in range (4):
+        idx = rn.randint(0, len(img_dir))
+            #randomly selected image
+        img = import_img(DIR, img_dir[idx])
+        ax[i,j].imshow(img)
+
+        square = plt.Rectangle((32,32), 32, 32, fc="gold", ec="gold",
+                               linewidth=3, alpha=0.2)
+            #adding yellow box of 32 x 32 pixels.
+        ax[i,j].add_patch(square)
+        ax[i,j].axis('off')
+
+        ax[i,j].set_title(f"Cancer label: {train_labels_df.iloc[idx][1]}")
+
+plt.tight_layout()
+
+# Saving the image ids as an array named ids.
+ids = train_labels_df.iloc[:, 0].to_numpy()
+
+# Saving the labels as an array named y.
+y = train_labels_df.iloc[:, 1].to_numpy()
+
+# Inspecting the first three images in the train labels data,
+# to compare with the first three images in the directory of image data.
+
+print(f"The first three images in train labels data: {ids[0:3]}.")
+print(f"The first three images in the directory of image data: {img_dir[0:3]}.")
+
+The images appear to be in different order, so in importing the image data, the images will will be accessed by the image name in the train_labels_df, and saved in that order.
+
+X = []
+for i in tqdm(y):
+  path = os.path.join(DIR, ids[i]+'.tif')
+  img = cv2.imread(path, cv2.IMREAD_COLOR)
+
+  X.append(np.array(img[32:64, 32:64]))
+
+print(f"The number of files imported is {len(X)}. The shape of the first file \
+in X is {X[0].shape}.")
+
+# Normalize training data so the number of pixels is converted to a value
+# between 0.0 and 1.0
+
+X = np.array(X)
+X = X/255
+
+# Print a randomly selected image to ensure all values are between 0.0 and 1.0.
+
+idx = rn.randint(0, len(y))
+X[idx]
+
+# Checking the type and size of the training data for X and y
+
+print(type(X), type(y))
+print(X.shape, y.shape)
+
+# Checking that all images are have 96 x 96 pixels, and have three layers
+# (red-green-blue colors).
+
+img_rows = X[0].shape[0]
+img_cols = X[0].shape[1]
+count = 0
+for i in range(len(X)):
+    if X[i].shape != (img_rows, img_cols, 3):
+        print(f"Error in pixel size for image {i}.")
+    else: count += 1
+
+print(f"No errors in pixel size for {count} images.")
+
+## Data Dimensions
+The training data and training labels were imported separately. There are 220,025 labels of value 0 or 1, with no null or missing values.
+
+The training data is 220,025 tif files. Each file is an image of 96 x 96 x 3 pixels, but since only the center 32 x x 32 x 3 is considered in the detection of cancerous cells, that portion of the data was imported.
+
+## Exploratory Data Analysis
+
+# Visualization of the distribution of labels.
+
+plt.figure(figsize=(5,5))
+train_labels_df['label'].value_counts(normalize = True).plot(kind = 'bar',
+                        color = ['steelblue', 'orange'])
+plt.ylabel('Percentage')
+plt.title('Percentage of train labels that are 0 and 1')
+plt.show()
+
+print(f"The proportion of train labels that are 0 is \
+{np.round(train_labels_df['label'].value_counts(normalize = True)[0], 2)}, \
+and the proportion of train labels that are 1 is \
+{np.round(train_labels_df['label'].value_counts(normalize = True)[1], 2)}.")
+
+# Function to plot image with subplots of the red, green and blue channels,
+# plus the corresponding histograms showing the intensity of each color.
+
+def img_rgb(idx):
+    #img = import_img(DIR, img_dir, idx)
+    red = X[idx][:, :, 0]
+    green = X[idx][:, :, 1]
+    blue = X[idx][:, :, 2]
+
+    fig, ax = plt.subplots(1,4, figsize=(8,5))
+    ax[0].imshow(X[idx])
+    ax[1].imshow(red, cmap='gray')
+    ax[2].imshow(green, cmap='gray')
+    ax[3].imshow(blue, cmap='gray')
+    fig.suptitle(f"Cancer label: {y[idx]}",fontsize=20)
+
+    title = ['Original', 'Red', 'Green', 'Blue']
+    for col in range(0,4):
+        ax[col].set_title(title[col])
+        #square = plt.Rectangle((32,32), 32, 32, fc="gold", ec="gold",
+        #                       linewidth=3, alpha=0.2)
+        #ax[col].add_patch(square)
+        ax[col].axis('off')
+
+    plt.show()
+
+    #Show the histograms for each color in the image
+    fig, ax = plt.subplots(3, 1, figsize=(7.5, 4), sharex = True, sharey=True)
+    ax[0].hist(red.ravel(), bins=256, color='red')
+    ax[1].hist(green.ravel(), bins=256, color='green')
+    ax[2].hist(blue.ravel(), bins=256, color='blue')
+    fig.suptitle('Histograms of RGB intensity', fontsize=10)
+
+    plt.show()
+
+# Plotting the RGB channels for a randomly selected image from the training data.
+rn.seed=124
+idx = rn.randint(0, len(y))
+img_rgb(idx)
+
+## EDA Conclusions
+Each of the images is 96 x 96 pixels with three layers, measuring the intensity of red, green and blue in each pixel. As this dataset was published without duplicates and all files are the same dimensions, with no null or missing values, no further cleaning was needed.
+Due to the large number of images and pixels, in the modelling, only the center 32 x 32 center will be used. This reduces the number of pixels, 96 x 96 x 3 (color layers) = 27,648, to 32 x 32 x 3 = 3072, which is about 11% of the original.
+For the modelling, several CNN architectures will be evaluated with validation data and a test set, with hyperparameter tuning for the filter layer, pooling, padding, learning rate, batch size and epochs.
+
+## Modelling
+
+
+from sklearn.model_selection import train_test_split
+from tensorflow import keras
+from keras.models import Sequential
+from keras.layers import Dense, Conv2D, Flatten, MaxPool2D, Dropout
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.models import load_model
+
+
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3,
+                                                    random_state=42)
+
+print(len(X_train))
+print(len(X_test))
+
+## CNN Model Architecture: Part 1
+The initial CNN model has 2 convolution layers, with 32 filters, kernel size of 3, and relu activitation, and pooling after the convolution layer. The final dense layer has one filter and sigmoid activation for binary classification.
+
+
+model = Sequential()
+model.add(Conv2D(32, kernel_size=3, activation='relu',
+                  input_shape=(img_rows, img_cols, 3)))
+model.add(MaxPool2D(2))
+model.add(Conv2D(64, kernel_size=3, activation='relu',
+                  input_shape=(img_rows, img_cols, 3)))
+model.add(MaxPool2D(2))
+model.add(Flatten())
+model.add(Dense(1, activation='sigmoid'))
+model.summary()
+
+model.compile(optimizer='adam', loss='binary_crossentropy',
+                  metrics=['accuracy'])
+
+checkpoint_callback = ModelCheckpoint(filepath='best_model.h5',
+                                      monitor='val_loss', save_best_only=True)
+
+history = model.fit(X_train, y_train, validation_split=0.2,
+                      batch_size=32, epochs=5, callbacks=[checkpoint_callback])
+
+result = model.evaluate(X_test, y_test)
+
+def plot_loss_acc(training, results, model_name):
+  fig, ax = plt.subplots(1, 2, figsize=(8,4), sharey=False)
+  ax[0].plot(training.history['loss'], color='steelblue')
+  ax[0].plot(training.history['val_loss'], color='orange')
+  ax[0].axhline(y=results[0], color='red', linestyle='dashed')
+  ax[0].legend(['loss', 'val_loss', 'test loss'])
+  ax[0].set_xlabel('Epochs')
+
+  ax[1].plot(training.history['accuracy'], color='steelblue')
+  ax[1].plot(training.history['val_accuracy'], color='orange')
+  ax[1].axhline(y=results[1], color='red', linestyle='dashed')
+  ax[1].legend(['accuracy', 'val_accuracy', 'test accuracy'])
+  ax[1].set_xlabel('Epochs')
+
+  fig.suptitle(f"{model_name}", fontsize=20,
+               verticalalignment='top')
+  plt.show()
+
+plot_loss_acc(history, result, 'CNN Model with 2 Layers + Pooling')
+
+With the valuation and testing accuracy at 1.000, the results of are most likely overfitting.
+
+These methods will be applied to try to have more realistic validation and testing accuracy, and subsequently improved final results:
+
+
+1.   Separation of training and validation data in case there is any data leakage.
+2.   Increasing the size of the data using ImageDataGenerator.
+3. Making adjustments to the optimizer in the compiling step.
+
+
+
+
+# Separating Training and Validation Data
+
+# Separating training data from the validation data
+X_train, X_val, y_train, y_val = train_test_split(X_train, y_train,
+                                                  test_size=0.2,
+                                                  random_state=42)
+
+print(X_train.shape)
+print(X_val.shape)
+
+# Compiling the model again to fit with different training and pre-split
+# validation data
+model.compile(optimizer='adam', loss='binary_crossentropy',
+                  metrics=['accuracy'])
+
+checkpoint_callback2 = ModelCheckpoint(filepath='best_model2.h5',
+                                      monitor='val_loss', save_best_only=True)
+
+history2 = model.fit(X_train, y_train, validation_data=(X_val, y_val),
+                      batch_size=32, epochs=5, callbacks=[checkpoint_callback2])
+
+result2 = model.evaluate(X_test, y_test)
+
+plot_loss_acc(history2, result2, 'CNN Model with Validation Data Split')
+
+# Comparing loss and accuracy with test data
+
+loss = np.round([result[0], result2[0]], 3)
+acc = np.round([result[1], result2[1]], 3)
+
+model_eval_df = pd.DataFrame({"loss": loss, "accuracy": acc},
+                             index = ['model 1', 'model 1 with val split'])
+model_eval_df
+
+# Results
+Separating the validation and training data did not have any affect on the results. Both trained models have accuracy rates of 1.0 and loss rates of 0.0, which suggests they are overfitting. The next step is to use image augmentation to increase the data.
+
+# Increasing the Size of the Data
+The function ImageDataGenerator will be used to increase the number of samples in the training data.
+Because of the large size of the training data, the flow_from_dataframe() method will be used.
+
+# Converting the image ids to file paths
+ids_tif = '/content/train/' + ids +'.tif'
+ids_tif
+
+# Converting the cancer labels into strings for the ImageDataGenerator
+cancer_label = [str(i) for i in y]
+type(cancer_label[0])
+
+# Converting the file paths and cancer labels to a data frame format for the
+# ImageDataGenerator to access
+df=pd.DataFrame({"image":ids_tif,"cancer_label":cancer_label})
+df.head()
+
+df_num=df.value_counts(subset="cancer_label").reset_index()
+df_num
+
+X_train, X_test, y_train, y_test = train_test_split(df['image'],
+                                                    df['cancer_label'],
+                                                    test_size=0.1,
+                                                    random_state=42)
+print("X_train shape: ", X_train.shape)
+print("X_test shape: ", X_test.shape)
+print("y_train shape: ", y_train.shape)
+print("y_test shape: ", y_test.shape)
+
+X_train, X_val, y_train, y_val = train_test_split(X_train, y_train,
+                                                    test_size=0.2,
+                                                    random_state=42)
+print("X_train shape: ", X_train.shape)
+print("X_val shape: ", X_val.shape)
+print("y_train shape: ", y_train.shape)
+print("y_val shape: ", y_val.shape)
+
+# Separating the training, validation and test data frames.
+df_train= pd.DataFrame({'image': X_train, 'label': y_train})
+df_val = pd.DataFrame({'image': X_val, 'label': y_val})
+df_test = pd.DataFrame({'image': X_test, 'label': y_test})
+print(df_train.shape)
+print(df_val.shape)
+print(df_test.shape)
+
+df_train.head()
+
+# Setting the image and batch size for the image generator
+image_size = (32, 32, 3)
+batch_size = 32
+
+# Initializing the ImageData Generator for training and validation data
+train_datagen=ImageDataGenerator(rescale=1/255,
+                          rotation_range=25,
+                          width_shift_range=0.2,
+                          height_shift_range=0.2,
+                          shear_range=0.2,
+                          zoom_range=0.2,
+                          horizontal_flip=True
+                        )
+
+val_datagen=ImageDataGenerator(rescale=1/255,
+                          rotation_range=25,
+                          width_shift_range=0.2,
+                          height_shift_range=0.2,
+                          shear_range=0.2,
+                          zoom_range=0.2,
+                          horizontal_flip=True
+                        )
+
+train_generator=train_datagen.flow_from_dataframe(df_train,
+                                           x_col="image",
+                                           y_col="label",
+                                           target_size=image_size[:2],
+                                           batch_size=batch_size,
+                                           class_mode="binary",
+                                           shuffle=True)
+
+val_generator=val_datagen.flow_from_dataframe(df_val,
+                                         x_col="image",
+                                         y_col="label",
+                                         target_size=image_size[:2],
+                                         batch_size=batch_size,
+                                         class_mode="binary",
+                                         shuffle=False)
+
+test_generator=val_datagen.flow_from_dataframe(df_test,
+                                         x_col="image",
+                                         y_col="label",
+                                         target_size=image_size[:2],
+                                         batch_size=batch_size,
+                                         class_mode="binary",
+                                         shuffle=False)
+
+# Compiling and fitting the generated data to the CNN model
+model.compile(optimizer='adam', loss='binary_crossentropy',
+                  metrics=['accuracy'])
+
+checkpoint_callback3 = ModelCheckpoint(filepath='best_model3.h5',
+                                      monitor='val_loss', save_best_only=True)
+
+history3 = model.fit_generator(generator=train_generator,
+                           epochs=5,
+                           validation_data=val_generator,
+                           shuffle=True, callbacks=[checkpoint_callback3])
+
+results3 = model.evaluate(test_generator)
+
+plot_loss_acc(history3, results3, 'CNN Model using ImageDataGenerator')
+
+The results with the ImageDataGenerator look more realistic, but with 5 epochs the the validation accuracy is still changing rapidly, so the model will be retrained with 20 epochs.
+
+# Compiling and fitting the generated data to the CNN model with 20 epochs
+model.compile(optimizer='adam', loss='binary_crossentropy',
+                  metrics=['accuracy'])
+
+checkpoint_callback4 = ModelCheckpoint(filepath='best_model4.h5',
+                                      monitor='val_loss', save_best_only=True)
+
+history4 = model.fit_generator(generator=train_generator,
+                           epochs=20,
+                           validation_data=val_generator,
+                           shuffle=True,
+                           verbose=1, callbacks=[checkpoint_callback4])
+
+results4 = model.evaluate(test_generator)
+
+plot_loss_acc(history4, results4, 'CNN Model using ImageDataGenerator, 20 epochs')
+
+# Optimizer: Learning Rate
+Fitting the model over 20 epochs showed the changes in loss and accuracy beginning to stabilize, with an improvement in the final test result. However, there is still noticeable overcorrection in the validation loss and accuracy.
+
+Three additional modifications will be explored:
+
+
+1.   Increasing the learning rate to 0.01 from the default 0.001
+2.   Decreasing the learning rate to 0.0001
+3. Adding drop out to the model
+
+
+
+# Learning rate = 0.01
+opt = keras.optimizers.Adam(learning_rate=0.01)
+model.compile(optimizer=opt, loss='binary_crossentropy',
+                  metrics=['accuracy'])
+
+checkpoint_callback5 = ModelCheckpoint(filepath='best_model5.h5',
+                                      monitor='val_loss', save_best_only=True)
+
+history5 = model.fit_generator(generator=train_generator,
+                           epochs=10,
+                           validation_data=val_generator,
+                           shuffle=True,
+                           verbose=1)
+
+results5 = model.evaluate(test_generator)
+
+plot_loss_acc(history5, results5,
+              'CNN Model using ImageDataGenerator, learning rate = 0.01')
+
+# Learning rate = 0.0001
+opt = keras.optimizers.Adam(learning_rate=0.0001)
+model.compile(optimizer=opt, loss='binary_crossentropy',
+                  metrics=['accuracy'])
+
+checkpoint_callback6 = ModelCheckpoint(filepath='best_model6.h5',
+                                      monitor='val_loss', save_best_only=True)
+
+history6 = model.fit_generator(generator=train_generator,
+                           epochs=10,
+                           validation_data=val_generator,
+                           shuffle=True,
+                           verbose=1)
+
+results6 = model.evaluate(test_generator)
+
+plot_loss_acc(history6, results6,
+              'CNN Model using ImageDataGenerator, learning rate = 0.0001')
+
+Increasing the learning rate to 0.01 appears to cause overfitting, and decreasing it to 0.0001 slows the convergence to the point that no meaningful progress is made in 20 epochs.
+
+
+# Adding a Dropout Layer
+
+model_do = Sequential()
+model_do.add(Conv2D(32, kernel_size=3, activation='relu',
+                  input_shape=(img_rows, img_cols, 3)))
+model_do.add(MaxPool2D(2))
+model_do.add(Dropout(0.25))
+
+model_do.add(Conv2D(64, kernel_size=3, activation='relu',
+                  input_shape=(img_rows, img_cols, 3)))
+model_do.add(MaxPool2D(2))
+model_do.add(Dropout(0.25))
+
+model_do.add(Flatten())
+model_do.add(Dense(1, activation='sigmoid'))
+model_do.summary()
+
+model_do.compile(optimizer='adam', loss='binary_crossentropy',
+                  metrics=['accuracy'])
+
+checkpoint_callback_do = ModelCheckpoint(filepath='best_model_do.h5',
+                                      monitor='val_loss', save_best_only=True)
+
+history_do = model_do.fit_generator(generator=train_generator,
+                           epochs=10,
+                           validation_data=val_generator,
+                           shuffle=True,
+                           verbose=1)
+
+results_do = model_do.evaluate(test_generator)
+
+plot_loss_acc(history_do, results_do,
+              'CNN Model using ImageDataGenerator, with drop out')
+
+# Comparing loss and accuracy with test data for all models
+
+loss = np.round([result[0], result2[0], results3[0], results4[0], results5[0],
+                results6[0], results_do[0]], 3)
+acc = np.round([result[1], result2[1], results3[1], results4[1], results5[1],
+                results6[1], results_do[1]], 3)
+
+model_eval_df = pd.DataFrame({"loss": loss, "accuracy": acc},
+                             index = ['model 1', 'model 1 with val split',
+                                      'model with image gen, 10 epochs',
+                                      'model with image gen, 20 epochs',
+                                      'learning rate=0.01',
+                                      'learning rate=0.0001',
+                                      'model with drop out'])
+model_eval_df
+
+# Results and Analysis
+
+The models were based on the basic architecture of 2 convolutional layers and 2 pooling layers. The first convolutional layer has 32 filters and the second has 64.
+
+Considering the final test loss and accuracy scores for each model, the top performing models both had a learning rate of 0.001 (default). The best model was fit over 20 epochs with image augmentation. The second best result was from the same model, but with drop out layers added. The results of these models were very similar, suggesting that for this data and model architecture, adding drop out layers was not significant
+
+The most successful optimizations was adding more data using the ImageDataGenerator and increasing the number of epochs. Unfortunately, these were very slow to fit, which limited the number of epochs that could be used and the number of variations of hyperparameters and architectures that could be run.
+
+Varying the learning rate did not improve the performance, however in the future it could be good to try dynamic learning rates, as well as different numbers of filters and layers, as well as batch normalization.
+
+# Importing the file names of the test images
+DIR_test = '/content/test'
+img_dir_test = os.listdir(DIR_test)
+
+print(f"The file names of the first three images in the test data are: \
+{img_dir_test[0:3]}.")
+print("\n")
+print(f"The number of files in the test data is {len(img_dir_test)}.")
+
+# Importing test data
+X_test_data = []
+
+for idx in tqdm(img_dir_test):
+  img = import_img(DIR_test,idx)
+
+  X_test_data.append(np.array(img[32:64, 32:64]))
+
+print(f"The number of test data files imported is {len(X_test_data)}. The shape\
+ of the first file in X_test_data is {X_test_data[0].shape}.")
+
+# Normalize training data so the number of pixels is converted to a value
+# between 0.0 and 1.0
+X_test_data = np.array(X_test_data)
+X_test_data = X_test_data/255
+
+
+# NEW
+loaded_model = load_model('best_model4.h5')
+
+cancer_label = loaded_model.predict(X_test_data)
+cancer_label = np.round(cancer_label, 0).reshape(-1)
+cancer_label
+
+cancer_label.shape
+
+print(f"The proportion of predicted labels that are 1 is \
+{np.round(sum(cancer_label)/len(cancer_label), 2)}.")
+
+
+test_ids = []
+for id in range(len(img_dir_test)):
+  test_ids.append(img_dir_test[id].replace('.tif', ''))
+
+test_ids[0:5]
+
+np.savetxt(
+    'submission.csv',
+    np.rec.fromarrays([test_ids, cancer_label]),
+    fmt=['%s', '%g'],
+    delimiter=',',
+    header='id,label',
+    comments='',
+)
+
+# Look at the first few predictions
+!head submission.csv
+
+## Conclusions
+Running this model through the Kaggle competition got the accuracy result of 0.6223, significantly less than the testing accuracy of 0.834. The proportion of cancer labels in the submission predictions was 0.27, much less than the original training set of 0.41. Thus it appears that this model is failing to diagnose a significant number of cancerous tissue samples.
+
+In the future, it would be good to continue using ImageDataGenerator, while optimizing the hyperparameters for image generation. It would also be good to use a randomized search to test different combinations of model architectures and hyperparameters with larger epochs. Due to the slowing fitting time for the models, a randomized selection of parameters and hyperparameters would most likely be the most effective.
+
+## References
+Image augmentation:
+*   https://www.analyticsvidhya.com/blog/2020/08/image-augmentation-on-the-fly-using-keras-imagedatagenerator/
+*   https://www.kaggle.com/code/muhammedtuncayaydn/99-accuracy-using-cnn-algorithm-ricedataset
+
